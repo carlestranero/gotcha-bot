@@ -1,7 +1,9 @@
 // src/gotcha.js
-// Renders a "make it a quote" style image: grayscale avatar fading into black,
-// the quote (with inline custom emoji images) on the right, attribution beneath.
+// Renders a "make it a quote" image: grayscale avatar fading into black, the quote
+// (with inline emoji — both custom Discord emoji and standard unicode emoji drawn as
+// Twemoji images) on the right, and attribution beneath.
 const { createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas');
+const { parse: parseEmoji } = require('twemoji-parser');
 const path = require('node:path');
 const fs = require('node:fs');
 
@@ -12,7 +14,10 @@ const FONT = fs.existsSync(fontPath) ? 'Gotcha' : 'sans-serif';
 
 const WIDTH = 1200;
 const HEIGHT = 600;
-const EMOJI_RE = /<(a)?:(\w+):(\d+)>/g; // matches <:name:id> and <a:name:id>
+const CUSTOM_EMOJI_RE = /<(a)?:(\w+):(\d+)>/g; // <:name:id> and <a:name:id>
+
+// Twemoji image (the same emoji set Discord renders) for a given codepoint string.
+const twemojiUrl = (cp) => `https://cdn.jsdelivr.net/gh/jdecked/twemoji@latest/assets/72x72/${cp}.png`;
 
 async function makeGotcha({ text, authorName, username, avatarUrl }) {
   const canvas = createCanvas(WIDTH, HEIGHT);
@@ -49,7 +54,7 @@ async function makeGotcha({ text, authorName, username, avatarUrl }) {
   ctx.fillStyle = fade;
   ctx.fillRect(avatarSize - 280, 0, 280, HEIGHT);
 
-  // 5. Build the quote as a list of items (words + inline emoji images), wrap, and draw
+  // 5. Build the quote as words + inline emoji images, wrap, and draw
   const items = await buildItems(text);
 
   const textW = WIDTH - avatarSize;
@@ -98,19 +103,10 @@ async function makeGotcha({ text, authorName, username, avatarUrl }) {
   return await canvas.encode('png');
 }
 
-// Turn raw text (with <:name:id> tokens) into a flat list of word + emoji items.
+// Split text into ordered runs of plain text and emoji (custom + unicode),
+// then load each emoji image. Falls back to text if an image can't be fetched.
 async function buildItems(text) {
-  const tokens = [];
-  let last = 0;
-  let m;
-  EMOJI_RE.lastIndex = 0;
-  while ((m = EMOJI_RE.exec(text)) !== null) {
-    if (m.index > last) tokens.push({ type: 'text', value: text.slice(last, m.index) });
-    tokens.push({ type: 'emoji', name: m[2], id: m[3] });
-    last = m.index + m[0].length;
-  }
-  if (last < text.length) tokens.push({ type: 'text', value: text.slice(last) });
-
+  const tokens = tokenize(text);
   const items = [];
   for (const t of tokens) {
     if (t.type === 'text') {
@@ -118,20 +114,58 @@ async function buildItems(text) {
         if (word) items.push({ type: 'word', text: word });
       }
     } else {
-      const img = await loadEmoji(t.id);
+      const img = await loadRemoteImage(t.url);
       if (img) items.push({ type: 'emoji', img });
-      else items.push({ type: 'word', text: `:${t.name}:` }); // fallback if the fetch fails
+      else items.push({ type: 'word', text: t.fallback });
     }
   }
   return items;
 }
 
-async function loadEmoji(id) {
+function tokenize(text) {
+  const specials = [];
+
+  // Custom Discord emoji
+  CUSTOM_EMOJI_RE.lastIndex = 0;
+  let m;
+  while ((m = CUSTOM_EMOJI_RE.exec(text)) !== null) {
+    specials.push({
+      start: m.index,
+      end: m.index + m[0].length,
+      url: `https://cdn.discordapp.com/emojis/${m[3]}.png?size=64`,
+      fallback: `:${m[2]}:`,
+    });
+  }
+
+  // Standard unicode emoji (via twemoji-parser) -> Twemoji images
+  for (const e of parseEmoji(text, { assetType: 'png', buildUrl: twemojiUrl })) {
+    specials.push({ start: e.indices[0], end: e.indices[1], url: e.url, fallback: e.text });
+  }
+
+  specials.sort((a, b) => a.start - b.start);
+
+  const tokens = [];
+  let last = 0;
+  for (const s of specials) {
+    if (s.start < last) continue; // skip overlapping matches
+    if (s.start > last) tokens.push({ type: 'text', value: text.slice(last, s.start) });
+    tokens.push({ type: 'emoji', url: s.url, fallback: s.fallback });
+    last = s.end;
+  }
+  if (last < text.length) tokens.push({ type: 'text', value: text.slice(last) });
+  return tokens;
+}
+
+async function loadRemoteImage(url) {
   try {
-    const res = await fetch(`https://cdn.discordapp.com/emojis/${id}.png?size=64`);
-    if (!res.ok) return null;
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.warn(`emoji fetch HTTP ${res.status}: ${url}`);
+      return null;
+    }
     return await loadImage(Buffer.from(await res.arrayBuffer()));
-  } catch {
+  } catch (err) {
+    console.warn(`emoji fetch failed (${url}): ${err.message}`);
     return null;
   }
 }
