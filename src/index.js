@@ -24,6 +24,20 @@ const client = new Client({
 
 client.once(Events.ClientReady, (c) => console.log(`gotcha-bot online as ${c.user.tag}`));
 
+// Build the quote image + a subtext jump-link to the original message.
+// Returns a message payload, or null if the source has no text to quote.
+async function buildQuote(sourceMessage) {
+  const text = (sourceMessage.content || '').trim();
+  if (!text) return null;
+  const displayName = sourceMessage.member?.displayName || sourceMessage.author.username;
+  const avatarUrl = sourceMessage.author.displayAvatarURL({ extension: 'png', size: 512 });
+  const png = await makeGotcha({ text, authorName: displayName, avatarUrl });
+  return {
+    files: [new AttachmentBuilder(png, { name: 'gotcha.png' })],
+    content: `-# \u{1F517} ${sourceMessage.url}`, // small clickable link to the original
+  };
+}
+
 client.on(Events.InteractionCreate, async (interaction) => {
   // ---- Slash command: choose where pinned quotes are copied ----
   if (interaction.isChatInputCommand() && interaction.commandName === 'setpinchannel') {
@@ -38,25 +52,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
     });
   }
 
-  // ---- Feature 1: "Gotcha" context-menu command ----
+  // ---- "Gotcha" context-menu command (right-click → Apps → Gotcha) ----
   if (interaction.isMessageContextMenuCommand() && interaction.commandName === COMMAND_NAME) {
-    const target = interaction.targetMessage;
-    const content = (target.content || '').trim();
-    if (!content) {
-      return interaction.reply({
-        content: 'That message has no text to quote.',
-        flags: MessageFlags.Ephemeral,
-      });
-    }
-
     await interaction.deferReply();
-    const displayName = target.member?.displayName || target.author.username;
-    const avatarUrl = target.author.displayAvatarURL({ extension: 'png', size: 512 });
-
     try {
-      const png = await makeGotcha({ text: content, authorName: displayName, avatarUrl });
-      const file = new AttachmentBuilder(png, { name: 'gotcha.png' });
-      const sent = await interaction.editReply({ files: [file] });
+      const payload = await buildQuote(interaction.targetMessage);
+      if (!payload) return interaction.editReply('That message has no text to quote.');
+      const sent = await interaction.editReply(payload);
       await sent.react(PIN_EMOJI); // hint that users can pin it
     } catch (err) {
       console.error('gotcha render failed:', err);
@@ -65,7 +67,35 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
-// ---- Feature 2: Pin bypass ----
+// ---- Reply + mention: reply to a message, @mention the bot, get a quote ----
+client.on(Events.MessageCreate, async (message) => {
+  try {
+    if (message.author.bot) return;
+    // Must explicitly @mention the bot (not merely reply to it)
+    if (!message.mentions.has(client.user, { ignoreRepliedUser: true })) return;
+
+    if (!message.reference?.messageId) {
+      await message.reply("Reply to a message and mention me, and I'll quote it.");
+      return;
+    }
+
+    const referenced = await message.fetchReference();
+    if (referenced.author.bot) return; // don't quote other bots or myself
+
+    const payload = await buildQuote(referenced);
+    if (!payload) {
+      await message.reply('That message has no text to quote.');
+      return;
+    }
+
+    const sent = await message.channel.send(payload);
+    await sent.react(PIN_EMOJI);
+  } catch (err) {
+    console.error('reply-mention quote failed:', err);
+  }
+});
+
+// ---- Pin bypass: react 📌 on a quote to copy it to the pins channel ----
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
   try {
     if (user.bot) return;
@@ -95,8 +125,9 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
     const buf = Buffer.from(await res.arrayBuffer());
     const file = new AttachmentBuilder(buf, { name: original.name || 'gotcha.png' });
 
+    // message.content already holds the subtext link to the original — carry it over
     await pinChannel.send({
-      content: `\u{1F4CC} Pinned by ${user} from ${message.channel}`,
+      content: `\u{1F4CC} Pinned by ${user} from ${message.channel}\n${message.content || ''}`.trim(),
       files: [file],
     });
     await message.react(DONE_EMOJI);
