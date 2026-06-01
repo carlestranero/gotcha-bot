@@ -13,7 +13,7 @@ const FONT = fs.existsSync(fontPath) ? 'Gotcha' : 'sans-serif';
 const WIDTH = 1200;
 const HEIGHT = 600;
 
-async function makeGotcha({ text, authorName, avatarUrl }) {
+async function makeGotcha({ text, authorName, username, avatarUrl }) {
   const canvas = createCanvas(WIDTH, HEIGHT);
   const ctx = canvas.getContext('2d');
 
@@ -67,10 +67,19 @@ async function makeGotcha({ text, authorName, avatarUrl }) {
     y += lineHeight;
   }
 
-  // 6. Attribution
-  ctx.font = `400 ${Math.round(fontSize * 0.6)}px ${FONT}`;
-  ctx.fillStyle = '#aaaaaa';
-  ctx.fillText(`\u2014 ${authorName}`, centerX, y + 24);
+  // 6. Attribution — display name, then the @username handle beneath it
+  const nameSize = Math.round(fontSize * 0.6);
+  ctx.font = `400 ${nameSize}px ${FONT}`;
+  ctx.fillStyle = '#dddddd';
+  const nameY = y + 24;
+  ctx.fillText(`- ${authorName}`, centerX, nameY);
+
+  if (username) {
+    const handleSize = Math.round(fontSize * 0.42);
+    ctx.font = `400 ${handleSize}px ${FONT}`;
+    ctx.fillStyle = '#888888';
+    ctx.fillText(`@${username}`, centerX, nameY + nameSize * 1.1);
+  }
 
   // 7. Encode to PNG
   return await canvas.encode('png');

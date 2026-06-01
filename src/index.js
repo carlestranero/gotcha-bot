@@ -29,9 +29,11 @@ client.once(Events.ClientReady, (c) => console.log(`gotcha-bot online as ${c.use
 async function buildQuote(sourceMessage) {
   const text = (sourceMessage.content || '').trim();
   if (!text) return null;
-  const displayName = sourceMessage.member?.displayName || sourceMessage.author.username;
-  const avatarUrl = sourceMessage.author.displayAvatarURL({ extension: 'png', size: 512 });
-  const png = await makeGotcha({ text, authorName: displayName, avatarUrl });
+  const author = sourceMessage.author;
+  const displayName = sourceMessage.member?.displayName || author.displayName || author.username;
+  const username = author.username; // the @handle, e.g. "toxicimpulse"
+  const avatarUrl = author.displayAvatarURL({ extension: 'png', size: 512 });
+  const png = await makeGotcha({ text, authorName: displayName, username, avatarUrl });
   return {
     files: [new AttachmentBuilder(png, { name: 'gotcha.png' })],
     content: `-# \u{1F517} ${sourceMessage.url}`, // small clickable link to the original
