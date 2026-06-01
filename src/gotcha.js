@@ -56,7 +56,7 @@ async function makeGotcha({ text, authorName, username, avatarUrl }) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
-  const quote = `\u201C${text}\u201D`;
+  const quote = text;
   const { lines, fontSize } = fitText(ctx, quote, textW - 80, HEIGHT - 200);
   const lineHeight = fontSize * 1.25;
   let y = HEIGHT / 2 - (lines.length * lineHeight) / 2 - 20;
