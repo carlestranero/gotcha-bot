@@ -11,6 +11,10 @@ const COMMAND_NAME = 'Gotcha';
 const PIN_EMOJI = '\u{1F4CC}'; // 📌
 const DONE_EMOJI = '\u2705';   // ✅ marker so we don't double-pin
 
+// Tracks who created each quote (quoteMessageId -> creatorUserId), so only that
+// person can pin it. In-memory: entries are lost on restart (see notes).
+const quoteCreators = new Map();
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -27,7 +31,8 @@ client.once(Events.ClientReady, (c) => console.log(`gotcha-bot online as ${c.use
 // Build the quote image + a subtext jump-link to the original message.
 // Returns a message payload, or null if the source has no text to quote.
 async function buildQuote(sourceMessage) {
-  // cleanContent resolves mention tokens (<@id>, <#id>, <@&id>) to readable @name / #channel text
+  // cleanContent resolves mention tokens (<@id>, <#id>, <@&id>) to readable @name / #channel text.
+  // Custom emoji tokens (<:name:id>) are kept so gotcha.js can draw them as inline images.
   const text = (sourceMessage.cleanContent || '').trim();
   if (!text) return null;
   const author = sourceMessage.author;
@@ -62,7 +67,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const payload = await buildQuote(interaction.targetMessage);
       if (!payload) return interaction.editReply('That message has no text to quote.');
       const sent = await interaction.editReply(payload);
-      await sent.react(PIN_EMOJI); // hint that users can pin it
+      quoteCreators.set(sent.id, interaction.user.id); // only this user may pin it
+      await sent.react(PIN_EMOJI); // hint that they can pin it
     } catch (err) {
       console.error('gotcha render failed:', err);
       await interaction.editReply('Something went wrong generating that quote.');
@@ -92,6 +98,7 @@ client.on(Events.MessageCreate, async (message) => {
     }
 
     const sent = await message.channel.send(payload);
+    quoteCreators.set(sent.id, message.author.id); // only this user may pin it
     await sent.react(PIN_EMOJI);
   } catch (err) {
     console.error('reply-mention quote failed:', err);
@@ -110,14 +117,21 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
     if (message.author?.id !== client.user.id) return;   // only our own quotes
     if (message.attachments.size === 0) return;
 
+    // Only the person who created this quote may pin it.
+    const creatorId = quoteCreators.get(message.id);
+    if (creatorId && user.id !== creatorId) {
+      // Someone else tried to pin — remove their stray 📌 and stop.
+      await reaction.users.remove(user.id).catch(() => {});
+      return;
+    }
+
+    // Already pinned? (a ✅ is left behind once done)
+    if (message.reactions.cache.has(DONE_EMOJI)) return;
+
     const pinChannelId = getPinChannel(message.guildId);
     if (!pinChannelId) {
       return console.warn(`No pin channel set for guild ${message.guildId}. Run /setpinchannel.`);
     }
-
-    // Best-effort dedupe: skip if we already marked this message done
-    const done = message.reactions.cache.get(DONE_EMOJI);
-    if (done) { await done.users.fetch(); if (done.users.cache.has(client.user.id)) return; }
 
     const pinChannel = await client.channels.fetch(pinChannelId);
     if (!pinChannel?.isTextBased()) return;
@@ -133,7 +147,11 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
       content: `\u{1F4CC} Pinned by ${user} from ${message.channel}\n${message.content || ''}`.trim(),
       files: [file],
     });
+
+    // Clear every 📌 reaction (needs Manage Messages), then mark done with ✅
+    await message.reactions.cache.get(PIN_EMOJI)?.remove().catch(() => {});
     await message.react(DONE_EMOJI);
+    quoteCreators.delete(message.id); // no longer needed once pinned
   } catch (err) {
     console.error('Pin bypass failed:', err);
   }
