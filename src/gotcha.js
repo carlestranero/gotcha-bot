@@ -1,6 +1,6 @@
 // src/gotcha.js
 // Renders a "make it a quote" style image: grayscale avatar fading into black,
-// the quote centered on the right, attribution beneath.
+// the quote (with inline custom emoji images) on the right, attribution beneath.
 const { createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -12,6 +12,7 @@ const FONT = fs.existsSync(fontPath) ? 'Gotcha' : 'sans-serif';
 
 const WIDTH = 1200;
 const HEIGHT = 600;
+const EMOJI_RE = /<(a)?:(\w+):(\d+)>/g; // matches <:name:id> and <a:name:id>
 
 async function makeGotcha({ text, authorName, username, avatarUrl }) {
   const canvas = createCanvas(WIDTH, HEIGHT);
@@ -25,15 +26,14 @@ async function makeGotcha({ text, authorName, username, avatarUrl }) {
   const avatarSize = HEIGHT;
   try {
     const res = await fetch(avatarUrl);
-    const buf = Buffer.from(await res.arrayBuffer());
-    const avatar = await loadImage(buf);
+    const avatar = await loadImage(Buffer.from(await res.arrayBuffer()));
     ctx.drawImage(avatar, 0, 0, avatarSize, avatarSize);
   } catch {
     ctx.fillStyle = '#111111';
     ctx.fillRect(0, 0, avatarSize, avatarSize);
   }
 
-  // 3. Convert that region to grayscale (luminance)
+  // 3. Convert the avatar region to grayscale (luminance)
   const region = ctx.getImageData(0, 0, avatarSize, avatarSize);
   const d = region.data;
   for (let i = 0; i < d.length; i += 4) {
@@ -49,26 +49,39 @@ async function makeGotcha({ text, authorName, username, avatarUrl }) {
   ctx.fillStyle = fade;
   ctx.fillRect(avatarSize - 280, 0, 280, HEIGHT);
 
-  // 5. Quote text on the right half
+  // 5. Build the quote as a list of items (words + inline emoji images), wrap, and draw
+  const items = await buildItems(text);
+
   const textW = WIDTH - avatarSize;
   const centerX = avatarSize + textW / 2;
+  const { lines, fontSize } = fitText(ctx, items, textW - 80, HEIGHT - 200);
+
+  const lineHeight = fontSize * 1.25;
+  const emojiSize = fontSize;
+  ctx.font = `600 ${fontSize}px ${FONT}`;
+  const spaceW = ctx.measureText(' ').width;
+
   ctx.fillStyle = '#ffffff';
-  ctx.textAlign = 'center';
+  ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
 
-  const quote = text;
-  const { lines, fontSize } = fitText(ctx, quote, textW - 80, HEIGHT - 200);
-  const lineHeight = fontSize * 1.25;
   let y = HEIGHT / 2 - (lines.length * lineHeight) / 2 - 20;
-
-  ctx.font = `600 ${fontSize}px ${FONT}`;
   for (const line of lines) {
-    ctx.fillText(line, centerX, y);
+    let x = centerX - line.width / 2; // center each line manually
+    for (const item of line.items) {
+      if (item.type === 'emoji') {
+        ctx.drawImage(item.img, x, y - emojiSize / 2, emojiSize, emojiSize);
+      } else {
+        ctx.fillText(item.text, x, y);
+      }
+      x += item.w + spaceW;
+    }
     y += lineHeight;
   }
 
   // 6. Attribution — display name, then the @username handle beneath it
   const nameSize = Math.round(fontSize * 0.6);
+  ctx.textAlign = 'center';
   ctx.font = `400 ${nameSize}px ${FONT}`;
   ctx.fillStyle = '#dddddd';
   const nameY = y + 24;
@@ -85,28 +98,75 @@ async function makeGotcha({ text, authorName, username, avatarUrl }) {
   return await canvas.encode('png');
 }
 
-function fitText(ctx, text, maxWidth, maxHeight) {
+// Turn raw text (with <:name:id> tokens) into a flat list of word + emoji items.
+async function buildItems(text) {
+  const tokens = [];
+  let last = 0;
+  let m;
+  EMOJI_RE.lastIndex = 0;
+  while ((m = EMOJI_RE.exec(text)) !== null) {
+    if (m.index > last) tokens.push({ type: 'text', value: text.slice(last, m.index) });
+    tokens.push({ type: 'emoji', name: m[2], id: m[3] });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) tokens.push({ type: 'text', value: text.slice(last) });
+
+  const items = [];
+  for (const t of tokens) {
+    if (t.type === 'text') {
+      for (const word of t.value.split(/\s+/)) {
+        if (word) items.push({ type: 'word', text: word });
+      }
+    } else {
+      const img = await loadEmoji(t.id);
+      if (img) items.push({ type: 'emoji', img });
+      else items.push({ type: 'word', text: `:${t.name}:` }); // fallback if the fetch fails
+    }
+  }
+  return items;
+}
+
+async function loadEmoji(id) {
+  try {
+    const res = await fetch(`https://cdn.discordapp.com/emojis/${id}.png?size=64`);
+    if (!res.ok) return null;
+    return await loadImage(Buffer.from(await res.arrayBuffer()));
+  } catch {
+    return null;
+  }
+}
+
+// Shrink the font until the wrapped lines fit the box.
+function fitText(ctx, items, maxWidth, maxHeight) {
   for (let size = 56; size >= 20; size -= 2) {
     ctx.font = `600 ${size}px ${FONT}`;
-    const lines = wrap(ctx, text, maxWidth);
+    const lines = layout(ctx, items, maxWidth, size);
     if (lines.length * size * 1.25 <= maxHeight) return { lines, fontSize: size };
   }
   ctx.font = `600 20px ${FONT}`;
-  return { lines: wrap(ctx, text, maxWidth), fontSize: 20 };
+  return { lines: layout(ctx, items, maxWidth, 20), fontSize: 20 };
 }
 
-function wrap(ctx, text, maxWidth) {
-  const words = text.split(/\s+/);
+// Greedy word-wrap that treats each emoji as a fixed-size box.
+function layout(ctx, items, maxWidth, fontSize) {
+  const spaceW = ctx.measureText(' ').width;
+  const emojiSize = fontSize;
   const lines = [];
-  let cur = '';
-  for (const w of words) {
-    const test = cur ? `${cur} ${w}` : w;
-    if (ctx.measureText(test).width > maxWidth && cur) {
-      lines.push(cur);
-      cur = w;
-    } else cur = test;
+  let cur = [];
+  let curW = 0;
+  for (const item of items) {
+    const w = item.type === 'emoji' ? emojiSize : ctx.measureText(item.text).width;
+    const sep = cur.length ? spaceW : 0;
+    if (cur.length && curW + sep + w > maxWidth) {
+      lines.push({ items: cur, width: curW });
+      cur = [{ ...item, w }];
+      curW = w;
+    } else {
+      cur.push({ ...item, w });
+      curW += sep + w;
+    }
   }
-  if (cur) lines.push(cur);
+  if (cur.length) lines.push({ items: cur, width: curW });
   return lines;
 }
 
