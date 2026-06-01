@@ -5,6 +5,7 @@ const {
   AttachmentBuilder, MessageFlags,
 } = require('discord.js');
 const { makeGotcha } = require('./gotcha');
+const { getPinChannel, setPinChannel } = require('./config');
 
 const COMMAND_NAME = 'Gotcha';
 const PIN_EMOJI = '\u{1F4CC}'; // 📌
@@ -23,32 +24,44 @@ const client = new Client({
 
 client.once(Events.ClientReady, (c) => console.log(`gotcha-bot online as ${c.user.tag}`));
 
-// ---- Feature 1: "Gotcha" context-menu command ----
 client.on(Events.InteractionCreate, async (interaction) => {
-  if (!interaction.isMessageContextMenuCommand()) return;
-  if (interaction.commandName !== COMMAND_NAME) return;
-
-  const target = interaction.targetMessage;
-  const content = (target.content || '').trim();
-  if (!content) {
+  // ---- Slash command: choose where pinned quotes are copied ----
+  if (interaction.isChatInputCommand() && interaction.commandName === 'setpinchannel') {
+    if (!interaction.guildId) {
+      return interaction.reply({ content: 'Use this inside a server.', flags: MessageFlags.Ephemeral });
+    }
+    const channel = interaction.options.getChannel('channel');
+    setPinChannel(interaction.guildId, channel.id);
     return interaction.reply({
-      content: 'That message has no text to quote.',
+      content: `\u{1F4CC} Pinned quotes will now be sent to ${channel}.`,
       flags: MessageFlags.Ephemeral,
     });
   }
 
-  await interaction.deferReply();
-  const displayName = target.member?.displayName || target.author.username;
-  const avatarUrl = target.author.displayAvatarURL({ extension: 'png', size: 512 });
+  // ---- Feature 1: "Gotcha" context-menu command ----
+  if (interaction.isMessageContextMenuCommand() && interaction.commandName === COMMAND_NAME) {
+    const target = interaction.targetMessage;
+    const content = (target.content || '').trim();
+    if (!content) {
+      return interaction.reply({
+        content: 'That message has no text to quote.',
+        flags: MessageFlags.Ephemeral,
+      });
+    }
 
-  try {
-    const png = await makeGotcha({ text: content, authorName: displayName, avatarUrl });
-    const file = new AttachmentBuilder(png, { name: 'gotcha.png' });
-    const sent = await interaction.editReply({ files: [file] });
-    await sent.react(PIN_EMOJI); // hint that users can pin it
-  } catch (err) {
-    console.error('gotcha render failed:', err);
-    await interaction.editReply('Something went wrong generating that quote.');
+    await interaction.deferReply();
+    const displayName = target.member?.displayName || target.author.username;
+    const avatarUrl = target.author.displayAvatarURL({ extension: 'png', size: 512 });
+
+    try {
+      const png = await makeGotcha({ text: content, authorName: displayName, avatarUrl });
+      const file = new AttachmentBuilder(png, { name: 'gotcha.png' });
+      const sent = await interaction.editReply({ files: [file] });
+      await sent.react(PIN_EMOJI); // hint that users can pin it
+    } catch (err) {
+      console.error('gotcha render failed:', err);
+      await interaction.editReply('Something went wrong generating that quote.');
+    }
   }
 });
 
@@ -64,8 +77,10 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
     if (message.author?.id !== client.user.id) return;   // only our own quotes
     if (message.attachments.size === 0) return;
 
-    const pinChannelId = process.env.PIN_CHANNEL_ID;
-    if (!pinChannelId) return console.warn('PIN_CHANNEL_ID not set.');
+    const pinChannelId = getPinChannel(message.guildId);
+    if (!pinChannelId) {
+      return console.warn(`No pin channel set for guild ${message.guildId}. Run /setpinchannel.`);
+    }
 
     // Best-effort dedupe: skip if we already marked this message done
     const done = message.reactions.cache.get(DONE_EMOJI);
