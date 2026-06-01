@@ -28,12 +28,22 @@ const client = new Client({
 
 client.once(Events.ClientReady, (c) => console.log(`gotcha-bot online as ${c.user.tag}`));
 
+// Resolve @user / @role / #channel mention tokens to readable text, while leaving
+// custom emoji tokens (<:name:id>) intact so gotcha.js can draw them as images.
+// NOTE: we can't use Message#cleanContent here — it also rewrites <:name:id> into
+// :name:, stripping the ID the renderer needs to fetch the emoji image.
+function resolveMentions(msg) {
+  return (msg.content || '')
+    .replace(/<@!?(\d{17,19})>/g, (_, id) =>
+      `@${msg.mentions.members?.get(id)?.displayName || msg.mentions.users.get(id)?.username || 'user'}`)
+    .replace(/<@&(\d{17,19})>/g, (_, id) => `@${msg.mentions.roles.get(id)?.name || 'role'}`)
+    .replace(/<#(\d{17,19})>/g, (_, id) => `#${msg.mentions.channels.get(id)?.name || 'channel'}`);
+}
+
 // Build the quote image + a subtext jump-link to the original message.
 // Returns a message payload, or null if the source has no text to quote.
 async function buildQuote(sourceMessage) {
-  // cleanContent resolves mention tokens (<@id>, <#id>, <@&id>) to readable @name / #channel text.
-  // Custom emoji tokens (<:name:id>) are kept so gotcha.js can draw them as inline images.
-  const text = (sourceMessage.cleanContent || '').trim();
+  const text = resolveMentions(sourceMessage).trim();
   if (!text) return null;
   const author = sourceMessage.author;
   const displayName = sourceMessage.member?.displayName || author.displayName || author.username;
