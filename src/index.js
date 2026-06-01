@@ -27,7 +27,8 @@ client.once(Events.ClientReady, (c) => console.log(`gotcha-bot online as ${c.use
 // Build the quote image + a subtext jump-link to the original message.
 // Returns a message payload, or null if the source has no text to quote.
 async function buildQuote(sourceMessage) {
-  const text = (sourceMessage.content || '').trim();
+  // cleanContent resolves mention tokens (<@id>, <#id>, <@&id>) to readable @name / #channel text
+  const text = (sourceMessage.cleanContent || '').trim();
   if (!text) return null;
   const author = sourceMessage.author;
   const displayName = sourceMessage.member?.displayName || author.displayName || author.username;
