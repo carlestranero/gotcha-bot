@@ -12,7 +12,7 @@ const commands = [
     .setType(ApplicationCommandType.Message)
     .toJSON(),
 
-  // /setpinchannel channel:#pins   (restricted to members who can manage the server)
+  // /setpinchannel #channel  — admins only
   new SlashCommandBuilder()
     .setName('setpinchannel')
     .setDescription('Set the channel where pinned quotes are copied')
@@ -21,7 +21,19 @@ const commands = [
         .setDescription('Channel to send pinned quotes to')
         .addChannelTypes(ChannelType.GuildText)
         .setRequired(true))
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .toJSON(),
+
+  // /setquotechannel #channel  — admins only
+  new SlashCommandBuilder()
+    .setName('setquotechannel')
+    .setDescription('Set the channel where generated quotes are posted')
+    .addChannelOption((opt) =>
+      opt.setName('channel')
+        .setDescription('Channel to post quotes in (leave unset to post in the triggering channel)')
+        .addChannelTypes(ChannelType.GuildText)
+        .setRequired(true))
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .toJSON(),
 ];
 

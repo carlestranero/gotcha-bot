@@ -5,7 +5,7 @@ const {
   AttachmentBuilder, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle,
 } = require('discord.js');
 const { makeGotcha } = require('./gotcha');
-const { getPinChannel, setPinChannel } = require('./config');
+const { getPinChannel, setPinChannel, getQuoteChannel, setQuoteChannel } = require('./config');
 
 const COMMAND_NAME = 'Gotcha';
 const PIN_EMOJI = '\u{1F4CC}'; // 📌
@@ -68,6 +68,15 @@ async function buildQuote(sourceMessage) {
   };
 }
 
+// Resolve where a quote should be posted: the configured quote channel if set and
+// valid, otherwise the fallback (the channel it was triggered in).
+async function resolveQuoteChannel(guildId, fallback) {
+  const id = guildId ? getQuoteChannel(guildId) : null;
+  if (!id) return fallback;
+  const ch = await client.channels.fetch(id).catch(() => null);
+  return ch?.isTextBased() ? ch : fallback;
+}
+
 client.on(Events.InteractionCreate, async (interaction) => {
   // ---- Slash command: choose where pinned quotes are copied ----
   if (interaction.isChatInputCommand() && interaction.commandName === 'setpinchannel') {
@@ -78,6 +87,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
     setPinChannel(interaction.guildId, channel.id);
     return interaction.reply({
       content: `\u{1F4CC} Pinned quotes will now be sent to ${channel}.`,
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  // ---- Slash command: choose where generated quotes are posted ----
+  if (interaction.isChatInputCommand() && interaction.commandName === 'setquotechannel') {
+    if (!interaction.guildId) {
+      return interaction.reply({ content: 'Use this inside a server.', flags: MessageFlags.Ephemeral });
+    }
+    const channel = interaction.options.getChannel('channel');
+    setQuoteChannel(interaction.guildId, channel.id);
+    return interaction.reply({
+      content: `\u{1F5BC}\uFE0F Quotes will now be posted in ${channel}.`,
       flags: MessageFlags.Ephemeral,
     });
   }
@@ -143,10 +165,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   // ---- "Gotcha" context-menu command (right-click → Apps → Gotcha) ----
   if (interaction.isMessageContextMenuCommand() && interaction.commandName === COMMAND_NAME) {
-    await interaction.deferReply();
+    const quoteChannelId = interaction.guildId ? getQuoteChannel(interaction.guildId) : null;
+    await interaction.deferReply(quoteChannelId ? { flags: MessageFlags.Ephemeral } : {});
     try {
       const payload = await buildQuote(interaction.targetMessage);
       if (!payload) return interaction.editReply('That message has no text to quote.');
+      if (quoteChannelId) {
+        const dest = await resolveQuoteChannel(interaction.guildId, null);
+        if (!dest) return interaction.editReply('The configured quote channel is invalid — ask an admin to run /setquotechannel.');
+        const sent = await dest.send(payload);
+        quoteCreators.set(sent.id, interaction.user.id);
+        await sent.react(PIN_EMOJI);
+        return interaction.editReply(`Quote posted in ${dest}.`);
+      }
       const sent = await interaction.editReply(payload);
       quoteCreators.set(sent.id, interaction.user.id); // only this user may pin it
       await sent.react(PIN_EMOJI);
@@ -177,9 +208,13 @@ client.on(Events.MessageCreate, async (message) => {
       return;
     }
 
-    const sent = await message.channel.send(payload);
+    const dest = await resolveQuoteChannel(message.guildId, message.channel);
+    const sent = await dest.send(payload);
     quoteCreators.set(sent.id, message.author.id); // only this user may pin it
     await sent.react(PIN_EMOJI);
+    if (dest.id !== message.channel.id) {
+      await message.reply({ content: `-# posted in ${dest}`, allowedMentions: { repliedUser: false } }).catch(() => {});
+    }
   } catch (err) {
     console.error('reply-mention quote failed:', err);
   }

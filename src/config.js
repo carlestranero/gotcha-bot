@@ -32,4 +32,16 @@ function setPinChannel(guildId, channelId) {
   save(data);
 }
 
-module.exports = { getPinChannel, setPinChannel };
+// Channel where generated quotes are posted (null = post in the channel it was triggered in).
+function getQuoteChannel(guildId) {
+  const data = load();
+  return data[guildId]?.quoteChannelId || null;
+}
+
+function setQuoteChannel(guildId, channelId) {
+  const data = load();
+  data[guildId] = { ...(data[guildId] || {}), quoteChannelId: channelId };
+  save(data);
+}
+
+module.exports = { getPinChannel, setPinChannel, getQuoteChannel, setQuoteChannel };
