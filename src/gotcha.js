@@ -13,8 +13,9 @@ const MIN_SIZE = 20;
 const CUSTOM_EMOJI_RE = /<(a)?:(\w+):(\d+)>/g;
 const twemojiUrl = (cp) => `https://cdn.jsdelivr.net/gh/jdecked/twemoji@latest/assets/72x72/${cp}.png`;
 
-async function makeGotcha({ text, authorName, username, avatarUrl, theme, fontId }) {
+async function makeGotcha({ text, authorName, username, avatarUrl, theme, fontId, avatarStyle }) {
   theme = theme || getDefaultTheme();
+  avatarStyle = avatarStyle || 'bw';
   const fontFamily = fontId ? getFontFamily(fontId) : getFontFamily(getDefaultFont().id);
 
   const canvas = createCanvas(WIDTH, HEIGHT);
@@ -23,7 +24,7 @@ async function makeGotcha({ text, authorName, username, avatarUrl, theme, fontId
   // 1. Draw themed background across the full canvas
   drawBackground(ctx, theme, WIDTH, HEIGHT);
 
-  // 2. Render and grayscale the avatar on a temporary canvas
+  // 2. Render the avatar on a temporary canvas
   const avatarSize = HEIGHT;
   const avatarCanvas = createCanvas(avatarSize, avatarSize);
   const actx = avatarCanvas.getContext('2d');
@@ -37,14 +38,16 @@ async function makeGotcha({ text, authorName, username, avatarUrl, theme, fontId
     actx.fillRect(0, 0, avatarSize, avatarSize);
   }
 
-  // 3. Grayscale the avatar
-  const region = actx.getImageData(0, 0, avatarSize, avatarSize);
-  const d = region.data;
-  for (let i = 0; i < d.length; i += 4) {
-    const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-    d[i] = d[i + 1] = d[i + 2] = lum;
+  // 3. Grayscale the avatar (skip if user chose color)
+  if (avatarStyle === 'bw') {
+    const region = actx.getImageData(0, 0, avatarSize, avatarSize);
+    const d = region.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      d[i] = d[i + 1] = d[i + 2] = lum;
+    }
+    actx.putImageData(region, 0, 0);
   }
-  actx.putImageData(region, 0, 0);
 
   // 4. Fade the avatar's right edge to transparent (works with any background)
   actx.globalCompositeOperation = 'destination-out';

@@ -21,12 +21,12 @@ function save(data) {
 
 function getUserPrefs(userId) {
   const data = load();
-  return data[userId] || { theme: 'black_white', font: 'inconsolata' };
+  return data[userId] || { theme: 'black_white', font: 'inconsolata', avatarStyle: 'bw' };
 }
 
-function setUserPrefs(userId, { theme, font }) {
+function setUserPrefs(userId, { theme, font, avatarStyle }) {
   const data = load();
-  data[userId] = { theme, font };
+  data[userId] = { theme, font, avatarStyle: avatarStyle || 'bw' };
   save(data);
 }
 

@@ -43,6 +43,17 @@ function fontSelectRow(currentId) {
   return new ActionRowBuilder().addComponents(menu);
 }
 
+function avatarStyleRow(current) {
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId('cq:avatar')
+    .setPlaceholder('Avatar style…')
+    .addOptions([
+      { label: 'Black & White', value: 'bw', description: 'Classic grayscale avatar', default: current === 'bw' },
+      { label: 'Color', value: 'color', description: 'Full-color avatar', default: current === 'color' },
+    ]);
+  return new ActionRowBuilder().addComponents(menu);
+}
+
 function buttonRow() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('cq:apply').setLabel('Apply').setStyle(ButtonStyle.Success),
@@ -66,18 +77,21 @@ async function renderPreview(interaction, session) {
     avatarUrl,
     theme,
     fontId: session.font,
+    avatarStyle: session.avatarStyle,
   });
 }
 
 function buildPayload(png, session) {
   const themeName = getTheme(session.theme).name;
   const fontName = getFont(session.font).name;
+  const avatarLabel = session.avatarStyle === 'color' ? 'Color' : 'B&W';
   return {
-    content: `**Quote Customization**\nTheme: **${themeName}** · Font: **${fontName}**`,
+    content: `**Quote Customization**\nTheme: **${themeName}** · Font: **${fontName}** · Avatar: **${avatarLabel}**`,
     files: [new AttachmentBuilder(png, { name: 'preview.png' })],
     components: [
       themeSelectRow(session.theme),
       fontSelectRow(session.font),
+      avatarStyleRow(session.avatarStyle),
       buttonRow(),
     ],
     flags: MessageFlags.Ephemeral,
@@ -90,7 +104,7 @@ async function handleCommand(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const prefs = getUserPrefs(interaction.user.id);
-  const session = { theme: prefs.theme, font: prefs.font };
+  const session = { theme: prefs.theme, font: prefs.font, avatarStyle: prefs.avatarStyle || 'bw' };
   sessions.set(interaction.user.id, session);
 
   const png = await renderPreview(interaction, session);
@@ -117,17 +131,28 @@ async function handleFontSelect(interaction) {
   await interaction.editReply(buildPayload(png, session));
 }
 
+async function handleAvatarSelect(interaction) {
+  const session = sessions.get(interaction.user.id);
+  if (!session) return interaction.reply({ content: 'Session expired — run /customizequote again.', flags: MessageFlags.Ephemeral });
+
+  session.avatarStyle = interaction.values[0];
+  await interaction.deferUpdate();
+  const png = await renderPreview(interaction, session);
+  await interaction.editReply(buildPayload(png, session));
+}
+
 async function handleApply(interaction) {
   const session = sessions.get(interaction.user.id);
   if (!session) return interaction.reply({ content: 'Session expired — run /customizequote again.', flags: MessageFlags.Ephemeral });
 
-  setUserPrefs(interaction.user.id, { theme: session.theme, font: session.font });
+  setUserPrefs(interaction.user.id, { theme: session.theme, font: session.font, avatarStyle: session.avatarStyle });
   sessions.delete(interaction.user.id);
 
   const themeName = getTheme(session.theme).name;
   const fontName = getFont(session.font).name;
+  const avatarLabel = session.avatarStyle === 'color' ? 'Color' : 'B&W';
   await interaction.update({
-    content: `Saved! Your quotes will now use **${themeName}** theme with **${fontName}** font.`,
+    content: `Saved! Your quotes will now use **${themeName}** theme with **${fontName}** font and **${avatarLabel}** avatar.`,
     files: [],
     components: [],
   });
@@ -153,8 +178,9 @@ async function handleInteraction(interaction) {
 
   const action = interaction.customId.slice(3); // strip 'cq:'
   if (interaction.isStringSelectMenu()) {
-    if (action === 'theme') { await handleThemeSelect(interaction); return true; }
-    if (action === 'font')  { await handleFontSelect(interaction);  return true; }
+    if (action === 'theme')  { await handleThemeSelect(interaction);  return true; }
+    if (action === 'font')   { await handleFontSelect(interaction);   return true; }
+    if (action === 'avatar') { await handleAvatarSelect(interaction); return true; }
   }
   if (interaction.isButton()) {
     if (action === 'apply')  { await handleApply(interaction);  return true; }

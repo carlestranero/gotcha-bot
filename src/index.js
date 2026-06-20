@@ -70,7 +70,7 @@ async function buildQuote(sourceMessage, requesterId) {
   const avatarUrl = author.displayAvatarURL({ extension: 'png', size: 512 });
   const prefs = requesterId ? getUserPrefs(requesterId) : {};
   const theme = prefs.theme ? getTheme(prefs.theme) : undefined;
-  const png = await makeGotcha({ text, authorName: displayName, username, avatarUrl, theme, fontId: prefs.font });
+  const png = await makeGotcha({ text, authorName: displayName, username, avatarUrl, theme, fontId: prefs.font, avatarStyle: prefs.avatarStyle });
   return {
     files: [new AttachmentBuilder(png, { name: 'gotcha.png' })],
     content: `-# \u{1F517} ${sourceMessage.url}`,
