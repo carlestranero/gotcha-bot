@@ -47,13 +47,17 @@ const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
 
 (async () => {
   try {
-    const route = process.env.GUILD_ID
-      ? Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID)
-      : Routes.applicationCommands(process.env.CLIENT_ID);
-    await rest.put(route, { body: commands });
-    console.log(process.env.GUILD_ID
-      ? 'Registered guild commands (appear instantly).'
-      : 'Registered global commands (can take up to 1 hour).');
+    if (process.env.GUILD_ID) {
+      // Register to the test guild (instant) and clear any stale global commands
+      await rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID), { body: commands });
+      await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: [] });
+      console.log('Registered guild commands (appear instantly). Cleared global commands.');
+    } else {
+      // Register globally and clear any stale guild commands can't be done without GUILD_ID
+      await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commands });
+      console.log('Registered global commands (can take up to 1 hour).');
+      console.log('Tip: if duplicates appear, set GUILD_ID in .env and re-run to clear stale guild commands.');
+    }
   } catch (err) {
     console.error(err);
   }
