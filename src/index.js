@@ -192,6 +192,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 client.on(Events.MessageCreate, async (message) => {
   try {
     if (message.author.bot) return;
+    if (message.mentions.everyone) return;
     if (!message.mentions.has(client.user, { ignoreRepliedUser: true })) return;
 
     if (!message.reference?.messageId) {
