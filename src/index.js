@@ -6,6 +6,12 @@ const {
 } = require('discord.js');
 const { makeGotcha } = require('./gotcha');
 const { getPinChannel, setPinChannel, getQuoteChannel, setQuoteChannel } = require('./config');
+const { registerFonts } = require('./fonts');
+const { getUserPrefs } = require('./userPrefs');
+const { getTheme } = require('./themes');
+const { handleInteraction: handleCustomize } = require('./customizeQuote');
+
+registerFonts();
 
 const COMMAND_NAME = 'Gotcha';
 const PIN_EMOJI = '\u{1F4CC}'; // 📌
@@ -54,14 +60,17 @@ function resolveMentions(msg) {
 }
 
 // Build the quote image + a subtext jump-link to the original message.
-async function buildQuote(sourceMessage) {
+// requesterId is the user who triggered the quote (their theme/font prefs are used).
+async function buildQuote(sourceMessage, requesterId) {
   const text = resolveMentions(sourceMessage).trim();
   if (!text) return null;
   const author = sourceMessage.author;
   const displayName = sourceMessage.member?.displayName || author.displayName || author.username;
   const username = author.username;
   const avatarUrl = author.displayAvatarURL({ extension: 'png', size: 512 });
-  const png = await makeGotcha({ text, authorName: displayName, username, avatarUrl });
+  const prefs = requesterId ? getUserPrefs(requesterId) : {};
+  const theme = prefs.theme ? getTheme(prefs.theme) : undefined;
+  const png = await makeGotcha({ text, authorName: displayName, username, avatarUrl, theme, fontId: prefs.font });
   return {
     files: [new AttachmentBuilder(png, { name: 'gotcha.png' })],
     content: `-# \u{1F517} ${sourceMessage.url}`,
@@ -78,6 +87,14 @@ async function resolveQuoteChannel(guildId, fallback) {
 }
 
 client.on(Events.InteractionCreate, async (interaction) => {
+  // ---- /customizequote and its select menus / buttons ----
+  try {
+    if (await handleCustomize(interaction)) return;
+  } catch (err) {
+    console.error('customizequote handler failed:', err);
+    return;
+  }
+
   // ---- Slash command: choose where pinned quotes are copied ----
   if (interaction.isChatInputCommand() && interaction.commandName === 'setpinchannel') {
     if (!interaction.guildId) {
@@ -168,7 +185,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const quoteChannelId = interaction.guildId ? getQuoteChannel(interaction.guildId) : null;
     await interaction.deferReply(quoteChannelId ? { flags: MessageFlags.Ephemeral } : {});
     try {
-      const payload = await buildQuote(interaction.targetMessage);
+      const payload = await buildQuote(interaction.targetMessage, interaction.user.id);
       if (!payload) return interaction.editReply('That message has no text to quote.');
       if (quoteChannelId) {
         const dest = await resolveQuoteChannel(interaction.guildId, null);
@@ -203,7 +220,7 @@ client.on(Events.MessageCreate, async (message) => {
     const referenced = await message.fetchReference();
     if (referenced.author.bot) return;
 
-    const payload = await buildQuote(referenced);
+    const payload = await buildQuote(referenced, message.author.id);
     if (!payload) {
       await message.reply('That message has no text to quote.');
       return;

@@ -1,16 +1,11 @@
 // src/gotcha.js
-// Renders a "make it a quote" image: grayscale avatar fading into black, the quote
-// (with inline emoji — custom Discord emoji and unicode emoji drawn as Twemoji images)
-// on the right, attribution beneath. Long unbreakable strings (e.g. URLs) wrap by
-// character, and over-long messages shrink then truncate with an ellipsis.
-const { createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas');
+// Renders a "make it a quote" image: grayscale avatar fading into a themed
+// background, the quote (with inline emoji — custom Discord emoji and unicode
+// emoji drawn as Twemoji images) on the right, attribution beneath.
+const { createCanvas, loadImage } = require('@napi-rs/canvas');
 const { parse: parseEmoji } = require('twemoji-parser');
-const path = require('node:path');
-const fs = require('node:fs');
-
-const fontPath = path.join(__dirname, '..', 'assets', 'fonts', 'Gotcha.ttf');
-if (fs.existsSync(fontPath)) GlobalFonts.registerFromPath(fontPath, 'Gotcha');
-const FONT = fs.existsSync(fontPath) ? 'Gotcha' : 'sans-serif';
+const { getDefaultTheme, drawBackground } = require('./themes');
+const { getFontFamily, getDefaultFont } = require('./fonts');
 
 const WIDTH = 1200;
 const HEIGHT = 600;
@@ -18,51 +13,60 @@ const MIN_SIZE = 20;
 const CUSTOM_EMOJI_RE = /<(a)?:(\w+):(\d+)>/g;
 const twemojiUrl = (cp) => `https://cdn.jsdelivr.net/gh/jdecked/twemoji@latest/assets/72x72/${cp}.png`;
 
-async function makeGotcha({ text, authorName, username, avatarUrl }) {
+async function makeGotcha({ text, authorName, username, avatarUrl, theme, fontId }) {
+  theme = theme || getDefaultTheme();
+  const fontFamily = fontId ? getFontFamily(fontId) : getFontFamily(getDefaultFont().id);
+
   const canvas = createCanvas(WIDTH, HEIGHT);
   const ctx = canvas.getContext('2d');
 
-  // 1. Black background
-  ctx.fillStyle = '#000000';
-  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  // 1. Draw themed background across the full canvas
+  drawBackground(ctx, theme, WIDTH, HEIGHT);
 
-  // 2. Avatar (left, square, full height)
+  // 2. Render and grayscale the avatar on a temporary canvas
   const avatarSize = HEIGHT;
+  const avatarCanvas = createCanvas(avatarSize, avatarSize);
+  const actx = avatarCanvas.getContext('2d');
+
   try {
     const res = await fetch(avatarUrl);
     const avatar = await loadImage(Buffer.from(await res.arrayBuffer()));
-    ctx.drawImage(avatar, 0, 0, avatarSize, avatarSize);
+    actx.drawImage(avatar, 0, 0, avatarSize, avatarSize);
   } catch {
-    ctx.fillStyle = '#111111';
-    ctx.fillRect(0, 0, avatarSize, avatarSize);
+    actx.fillStyle = '#111111';
+    actx.fillRect(0, 0, avatarSize, avatarSize);
   }
 
-  // 3. Grayscale the avatar region
-  const region = ctx.getImageData(0, 0, avatarSize, avatarSize);
+  // 3. Grayscale the avatar
+  const region = actx.getImageData(0, 0, avatarSize, avatarSize);
   const d = region.data;
   for (let i = 0; i < d.length; i += 4) {
     const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
     d[i] = d[i + 1] = d[i + 2] = lum;
   }
-  ctx.putImageData(region, 0, 0);
+  actx.putImageData(region, 0, 0);
 
-  // 4. Fade the avatar's right edge into the black background
-  const fade = ctx.createLinearGradient(avatarSize - 280, 0, avatarSize, 0);
-  fade.addColorStop(0, 'rgba(0,0,0,0)');
-  fade.addColorStop(1, 'rgba(0,0,0,1)');
-  ctx.fillStyle = fade;
-  ctx.fillRect(avatarSize - 280, 0, 280, HEIGHT);
+  // 4. Fade the avatar's right edge to transparent (works with any background)
+  actx.globalCompositeOperation = 'destination-out';
+  const fadeGrad = actx.createLinearGradient(avatarSize - 280, 0, avatarSize, 0);
+  fadeGrad.addColorStop(0, 'rgba(0,0,0,0)');
+  fadeGrad.addColorStop(1, 'rgba(0,0,0,1)');
+  actx.fillStyle = fadeGrad;
+  actx.fillRect(avatarSize - 280, 0, 280, avatarSize);
 
-  // 5. Build the quote as words + inline emoji images, wrap, and draw
+  // 5. Composite the faded avatar over the themed background
+  ctx.drawImage(avatarCanvas, 0, 0);
+
+  // 6. Build the quote as words + inline emoji images, wrap, and draw
   const items = await buildItems(text);
   const textW = WIDTH - avatarSize;
   const centerX = avatarSize + textW / 2;
-  const { lines, fontSize } = fitText(ctx, items, textW - 80, HEIGHT - 200);
+  const { lines, fontSize } = fitText(ctx, items, textW - 80, HEIGHT - 200, fontFamily);
   const lineHeight = fontSize * 1.25;
   const emojiSize = fontSize;
 
-  ctx.font = `600 ${fontSize}px ${FONT}`;
-  ctx.fillStyle = '#ffffff';
+  ctx.font = `600 ${fontSize}px ${fontFamily}`;
+  ctx.fillStyle = theme.textColor;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
 
@@ -78,18 +82,18 @@ async function makeGotcha({ text, authorName, username, avatarUrl }) {
     y += lineHeight;
   }
 
-  // 6. Attribution — display name, then @username
+  // 7. Attribution — display name, then @username
   const nameSize = Math.round(fontSize * 0.6);
   ctx.textAlign = 'center';
-  ctx.font = `400 ${nameSize}px ${FONT}`;
-  ctx.fillStyle = '#dddddd';
+  ctx.font = `400 ${nameSize}px ${fontFamily}`;
+  ctx.fillStyle = theme.nameColor;
   const nameY = y + 24;
   ctx.fillText(`- ${authorName}`, centerX, nameY);
 
   if (username) {
     const handleSize = Math.round(fontSize * 0.42);
-    ctx.font = `400 ${handleSize}px ${FONT}`;
-    ctx.fillStyle = '#888888';
+    ctx.font = `400 ${handleSize}px ${fontFamily}`;
+    ctx.fillStyle = theme.handleColor;
     ctx.fillText(`@${username}`, centerX, nameY + nameSize * 1.1);
   }
 
@@ -150,24 +154,21 @@ async function loadRemoteImage(url) {
 }
 
 // ---- layout ----
-// Find the largest font where the wrapped text fits; if even MIN_SIZE overflows,
-// truncate to the lines that fit and append an ellipsis.
-function fitText(ctx, items, maxWidth, maxHeight) {
+function fitText(ctx, items, maxWidth, maxHeight, fontFamily) {
   let smallest = null;
   for (let size = 56; size >= MIN_SIZE; size -= 2) {
-    ctx.font = `600 ${size}px ${FONT}`;
+    ctx.font = `600 ${size}px ${fontFamily}`;
     const lines = layout(ctx, items, maxWidth, size);
     if (lines.length * size * 1.25 <= maxHeight) return { lines, fontSize: size };
     smallest = { lines, fontSize: size };
   }
-  // Doesn't fit even at MIN_SIZE -> keep the lines that fit, add an ellipsis
   const { lines, fontSize } = smallest;
-  ctx.font = `600 ${fontSize}px ${FONT}`;
+  ctx.font = `600 ${fontSize}px ${fontFamily}`;
   const maxLines = Math.max(1, Math.floor(maxHeight / (fontSize * 1.25)));
   if (lines.length > maxLines) {
     const kept = lines.slice(0, maxLines);
     const last = kept[maxLines - 1];
-    const ell = '\u2026';
+    const ell = '…';
     const w = ctx.measureText(ell).width;
     last.items.push({ type: 'word', text: ell, w, sep: 0 });
     last.width += w;
@@ -176,8 +177,6 @@ function fitText(ctx, items, maxWidth, maxHeight) {
   return { lines, fontSize };
 }
 
-// Greedy wrap. Words wider than the box are broken at character boundaries
-// (so URLs and other unbreakable strings still wrap instead of running off).
 function layout(ctx, items, maxWidth, fontSize) {
   const spaceW = ctx.measureText(' ').width;
   const emojiSize = fontSize;
@@ -201,8 +200,6 @@ function layout(ctx, items, maxWidth, fontSize) {
   return lines;
 }
 
-// Replace any word wider than maxWidth with character-level fragments.
-// Fragments after the first are "glued" (no space before them).
 function expand(ctx, items, maxWidth) {
   const out = [];
   for (const item of items) {

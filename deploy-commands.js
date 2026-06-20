@@ -35,6 +35,12 @@ const commands = [
         .setRequired(true))
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .toJSON(),
+
+  // /customizequote — any user
+  new SlashCommandBuilder()
+    .setName('customizequote')
+    .setDescription('Customize your quote appearance (theme & font)')
+    .toJSON(),
 ];
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
