@@ -86,7 +86,7 @@ function buildPayload(png, session) {
   const fontName = getFont(session.font).name;
   const avatarLabel = session.avatarStyle === 'color' ? 'Color' : 'B&W';
   return {
-    content: `**Quote Customization**\nTheme: **${themeName}** · Font: **${fontName}** · Avatar: **${avatarLabel}**`,
+    content: `**Quote Customization**\n1. **Theme:** ${themeName}\n2. **Font:** ${fontName}\n3. **Avatar:** ${avatarLabel}`,
     files: [new AttachmentBuilder(png, { name: 'preview.png' })],
     components: [
       themeSelectRow(session.theme),
