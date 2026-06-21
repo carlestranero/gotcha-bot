@@ -146,7 +146,7 @@ data/                Runtime data (config.json, userPrefs.json)
 ## Invite URL
 
 ```
-https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=101440&scope=bot%20applications.commands
+https://discord.com/api/oauth2/authorize?client_id=1510970104840720484permissions=101440&scope=bot%20applications.commands
 ```
 
 Permissions 101440 = View Channels, Send Messages, Attach Files, Read Message
