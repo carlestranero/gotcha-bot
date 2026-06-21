@@ -6,6 +6,12 @@ a grayscale (or full-color) avatar, custom theme, and custom font. React to a
 quote with a pin emoji to copy it into a dedicated pins channel — a workaround for
 Discord's 50-pin-per-channel limit.
 
+## Use the bot
+
+If you want to use my bot, here's the invite:
+
+[![Add to Discord](https://img.shields.io/badge/Add%20to%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com/api/oauth2/authorize?client_id=1510970104840720484&permissions=109632&scope=bot%20applications.commands)
+
 ## Features
 
 - **Quote generation** — right-click a message → Apps → Gotcha, or reply to a
@@ -145,9 +151,12 @@ data/                Runtime data (config.json, userPrefs.json)
 
 ## Invite URL
 
+If you're self-hosting your own instance, build the invite link by swapping in
+your bot's `CLIENT_ID` (the Application ID from the Developer Portal):
+
 ```
-https://discord.com/api/oauth2/authorize?client_id=1510970104840720484permissions=101440&scope=bot%20applications.commands
+https://discord.com/api/oauth2/authorize?client_id=CLIENT_ID&permissions=109632&scope=bot%20applications.commands
 ```
 
-Permissions 101440 = View Channels, Send Messages, Attach Files, Read Message
-History, Add Reactions.
+Permissions 109632 = View Channels, Send Messages, Attach Files, Read Message
+History, Add Reactions, Manage Messages.
