@@ -12,6 +12,12 @@ If you want to use my bot, here's the invite:
 
 [![Add to Discord](https://img.shields.io/badge/Add%20to%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com/api/oauth2/authorize?client_id=1510970104840720484&permissions=109632&scope=bot%20applications.commands)
 
+## Example
+
+Here's what a generated quote looks like:
+
+![Example quote](gotcha.png)
+
 ## Features
 
 - **Quote generation** — right-click a message → Apps → Gotcha, or reply to a
